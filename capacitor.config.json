@@ -1,0 +1,6 @@
+{
+  "appId": "br.com.zanza",
+  "appName": "Zanza",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

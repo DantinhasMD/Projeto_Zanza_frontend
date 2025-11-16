@@ -7,7 +7,7 @@ const isLocalhost =
 // Backend URL (local vs produção)
 export const API_BASE_URL = isLocalhost
   ? "http://localhost:8080/"
-  : "https://projetozanza-production.up.railway.app/api";
+  : "https://projetozanza-production.up.railway.app";
 
 // Optional: websocket, se você realmente for usar
 export const WS_BASE_URL = API_BASE_URL.replace("http", "ws").replace("/api", "");

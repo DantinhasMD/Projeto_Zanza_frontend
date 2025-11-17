@@ -8,6 +8,7 @@ import { UserProfile } from './components/UserProfile';
 import { Button } from './components/ui/button'; 
 import { Input } from './components/ui/input'; 
 import { Badge } from './components/ui/badge';
+import { MapContainer, TileLayer, Polyline, Marker } from 'react-leaflet';
 import { Map, Route, Users, Menu, TrendingUp, AlertTriangle } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
 import CommunityTab from './components/CommunityTab';
@@ -16,6 +17,7 @@ import * as L from 'leaflet';
 import api from './services/api';
 import { authService } from './services/auth.service';
 import type { UsuarioResponseDTO } from '../src/types';
+import RouteSearchForm from "./components/RouteSearchForm";
 
 interface User {
   name: string;
@@ -48,7 +50,6 @@ export default function App() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number } | null>(null);
 
-  const [routes, setRoutes] = useState<any[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(true);
 
   const [communityStats, setCommunityStats] = useState<any | null>(null);
@@ -76,17 +77,73 @@ export default function App() {
     setHasAccount(false);
   };
 
-  // Buscar rotas
-  useEffect(() => {
-    if (activeTab === 'routes') {
+  const [routes, setRoutes] = useState<any[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState<any>(null);
+
+  const handleSearchRoutes = async (origin: string, destination: string) => {
+    try {
       setLoadingRoutes(true);
-      api
-        .get('/routes')
-        .then((res) => setRoutes(res.data))
-        .catch((err) => console.error('Erro ao carregar rotas:', err))
-        .finally(() => setLoadingRoutes(false));
+
+      // Coordenadas via backend
+      const fetchCoords = async (address: string) => {
+        const res = await fetch(
+          `http://localhost:8080/api/geocode?q=${encodeURIComponent(address)}`
+        );
+        const data = await res.json();
+        if (!data.length) return null;
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      };
+
+      const start = await fetchCoords(origin);
+      const end = await fetchCoords(destination);
+
+      if (!start || !end) {
+        alert("Não foi possível localizar os endereços!");
+        setRoutes([]);
+        return;
+      }
+
+      // OSRM: pedindo alternativas
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&alternatives=true`;
+      const res = await fetch(osrmUrl);
+      const data = await res.json();
+
+      if (!data.routes || !data.routes.length) {
+        alert("Não foi possível encontrar a rota.");
+        setRoutes([]);
+        return;
+      }
+
+      // Mapear 3 tipos: safe, balanced, fastest
+      const preparedRoutes = data.routes.slice(0, 3).map((route: any, index: number) => {
+        let safetyLevel: 'safe' | 'warning' | 'danger' = 'safe';
+        if (index === 1) safetyLevel = 'warning';
+        if (index === 2) safetyLevel = 'danger';
+
+        return {
+          id: index + 1,
+          origin,
+          destination,
+          geometry: route.geometry,
+          distance: route.distance, // metros
+          duration: route.duration, // segundos
+          safetyRating: Math.max(0, 5 - index),
+          contributors: Math.floor(Math.random() * 20),
+          safetyLevel,
+          type: index === 0 ? 'safe' : index === 1 ? 'balanced' : 'fastest',
+        };
+      });
+
+      setRoutes(preparedRoutes);
+      setSelectedRoute(preparedRoutes[0]); // inicial: primeira rota
+    } catch (error) {
+      console.error("Erro ao buscar rotas:", error);
+      setRoutes([]);
+    } finally {
+      setLoadingRoutes(false);
     }
-  }, [activeTab]);
+  };
+
 
   // Buscar dados da comunidade
   useEffect(() => {
@@ -143,7 +200,9 @@ export default function App() {
                     <Button variant="ghost" className="w-full justify-start">
                       Configurações
                     </Button>
-                    <Button
+                  </div>
+                )}
+                <Button
                       variant="ghost"
                       className="w-full justify-start"
                       onClick={() => window.open('https://github.com/DantinhasMD/Projeto_Zanza', '_blank')}
@@ -157,8 +216,6 @@ export default function App() {
                     >
                       Sair
                     </Button>
-                  </div>
-                )}
               </div>
             </SheetContent>
           </Sheet>
@@ -175,6 +232,32 @@ export default function App() {
                 className="bg-[#f5f5f3] border-gray-200 rounded-xl"
               />
             </div>
+
+            <Button
+              onClick={() => {
+                if (userLocation) {
+                  setSelectedLocation(userLocation);
+                  setGoToLocation(userLocation);
+                }
+              }}
+              className="h-10 px-3 bg-[#eaeaea] text-gray-700 hover:bg-gray-300 rounded-xl"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 11a4 4 0 100-8 4 4 0 000 8zm0 0v8m0 0H8m4 0h4"
+                />
+              </svg>
+            </Button>
+            
             <Button
               onClick={async () => {
                 if (!searchQuery) return;
@@ -221,6 +304,7 @@ export default function App() {
               setUserLocation={setUserLocation}
               selectedLocation={selectedLocation}
               setSelectedLocation={setSelectedLocation}
+              goToLocation={goToLocation}
             />
             <div className="absolute bottom-4 left-4 right-4 z-[9999] pointer-events-auto">
               <div className="bg-white rounded-3xl p-4 shadow-2xl">
@@ -261,21 +345,58 @@ export default function App() {
         )}
 
         {activeTab === 'routes' && (
-          <div className="h-full overflow-y-auto p-4 space-y-3 pb-24 bg-white">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2>Rotas recomendadas</h2>
-                <p className="text-sm text-gray-500">
-                  Baseado em avaliações da comunidade
-                </p>
-              </div>
+          <div className="h-full overflow-y-auto p-4 space-y-4 pb-24 bg-white">
+
+            {/* Título */}
+            <div className="mb-2">
+              <h2 className="text-lg font-semibold">Rotas recomendadas</h2>
+              <p className="text-sm text-gray-500">
+                Baseado na segurança das ruas avaliadas pela comunidade
+              </p>
             </div>
+
+            <RouteSearchForm onSearch={handleSearchRoutes} />
+
+            {/* Resultado */}
             {loadingRoutes ? (
               <p className="text-center text-gray-500">Carregando rotas...</p>
             ) : routes.length > 0 ? (
-              routes.map((route) => <RouteCard key={route.id} {...route} />)
+              <div className="space-y-4 mt-2">
+                {/* Cards dos resultados */}
+                <div className="flex flex-col gap-2">
+                  {routes.map((route) => (
+                    <div
+                      key={route.id}
+                      onClick={() => {
+                        setSelectedRoute(route);
+                        // centraliza mapa na rota selecionada: pega primeiro ponto da geometria
+                        if (route?.geometry?.coordinates?.length) {
+                          const first = route.geometry.coordinates[0];
+                          setGoToLocation({ lat: first[1], lng: first[0] });
+                        }
+                      }}
+                    >
+                      <RouteCard {...route} />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Mapa reutilizando MapView (fica abaixo dos cards) */}
+                <div className="mt-4 h-72 rounded-2xl overflow-hidden shadow">
+                  {/* MapView já contém o MapContainer e lógica de localização do usuário.
+                      Aqui passamos selectedRoute.geometry para desenhar por cima do mesmo mapa. */}
+                  <MapView
+                    userLocation={userLocation}
+                    setUserLocation={setUserLocation}
+                    selectedLocation={selectedLocation}
+                    setSelectedLocation={setSelectedLocation}
+                    goToLocation={goToLocation}
+                    routeGeoJSON={selectedRoute?.geometry ?? null}  // **novo prop**
+                  />
+                </div>
+              </div>
             ) : (
-              <p className="text-center text-gray-400">Nenhuma rota encontrada.</p>
+              <p className="text-center text-gray-400 mt-4">Nenhuma rota encontrada.</p>
             )}
           </div>
         )}

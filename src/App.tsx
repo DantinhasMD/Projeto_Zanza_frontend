@@ -391,7 +391,7 @@ export default function App() {
                     selectedLocation={selectedLocation}
                     setSelectedLocation={setSelectedLocation}
                     goToLocation={goToLocation}
-                    routeGeoJSON={selectedRoute?.geometry ?? null}  // **novo prop**
+                    
                   />
                 </div>
               </div>
